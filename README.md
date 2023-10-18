@@ -66,8 +66,40 @@ mongosh
 mongosh "mongodb://127.0.0.1:27017/mydatabase?readPreference=secondary"
 ```
 
-
 ```
 db.mycollection.find({ name: "John" })
 ```
+
+
+
+
+# mongo sharding
+
+```
+docker run --name mongo-config1 -d -p 27019:27019 mongo:latest --configsvr --replSet configrs --bind_ip_all --port 27019
+
+```
+
+### key points
+
+--configsvr: Indicates that this MongoDB instance will act as a config server. Config servers store metadata and configuration settings for a MongoDB sharded cluster.
+
+
+A MongoDB sharded cluster is a set of servers that distributes the dataset across multiple machines. To manage how the data is distributed and to store metadata about the chunks of data (which portions of the data reside on which shard), MongoDB uses configuration servers.
+
+
+--replSet configrs: Specifies that the MongoDB instance should be a member of a replica set named "configrs". Replica sets in MongoDB are groups of MongoDB processes that maintain the same dataset. This provides redundancy and high availability.
+
+--bind_ip_all: Tells the MongoDB instance to bind to all available IP addresses. This is useful if you want to allow connections from outside the container, rather than only from other containers or localhost.
+
+--port 27019: Specifies the port on which MongoDB should listen inside the container. Note that because of the -p flag we discussed earlier, this port inside the container will correspond to port 27019 on the host machine.
+
+
+
+
+
+
+
+
+
 
