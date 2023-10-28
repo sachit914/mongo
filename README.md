@@ -175,3 +175,103 @@ localhost:27021: Similarly, the second command is adding another MongoDB instanc
 ```
 sh.enableSharding("mydb");
 ```
+
+
+
+
+
+# ----------------------------------------------------------------------------------------------------------------------------------------------------
+
+# sharding
+
+Sharding is a database design pattern that involves splitting a large dataset across multiple databases to improve scalability, performance, and manageability. Each individual database in this system is referred to as a "shard". All shards together make up a single logical database, but each shard is hosted on a separate server instance.
+
+
+
+## How does Sharding work?
+Imagine you have a large user database. Instead of keeping all user profiles in a single database, you can distribute them based on some logic. For example:
+
+- Range-based sharding: Users with IDs 1 to 10,000 go to Shard A, 10,001 to 20,000 go to Shard B, and so on.
+- Hash-based sharding: Use a consistent hash function on a key (like user ID) to determine which shard the data goes to.
+- Directory-based sharding: Maintain a lookup service which keeps track of which shard holds which piece of data.
+
+
+## Ways to Implement Sharding:
+
+1) Application-level sharding: The logic for determining which shard a piece of data should go to is in the application itself. The application connects directly to the shard it needs.
+2) Middleware/database routers: A middleware layer sits between the application and the databases. The application connects to the middleware, which then routes the request to the appropriate shard.
+3) Database-level sharding: Some modern databases come with built-in sharding capabilities. For example, MongoDB's sharding cluster and Google Cloud Spanner are designed to automatically split data across nodes.
+
+
+                  +-----------+
+                  | Application |
+                  +------+----+
+                         |
+                  +------+----+
+                  | Middleware/|
+                  | DB Router  |
+                  +---+---+----+
+                      |   |
+               +------+   +------+
+               |                |
+          +----+----+     +-----+-----+
+          | Shard A |     | Shard B   |
+          +---------+     +-----------+
+
+- The application talks to a middleware or database router.
+- The middleware or router determines which shard (Shard A or Shard B) the request should go to based on the sharding logic.
+
+
+## Monitoring  tool
+
+- Prometheus
+- Grafana
+- Zabbix
+
+
+## Docker-Compose Setup
+
+```
+version: '3.8'
+
+services:
+  mongo-router:
+    image: mongo
+    command: mongos --configdb mongo-configsvr:27019
+    ports:
+      - 27017:27017
+  
+  mongo-shard1:
+    image: mongo
+    command: mongod --shardsvr --replSet shard1
+    expose:
+      - 27018
+  
+  mongo-shard2:
+    image: mongo
+    command: mongod --shardsvr --replSet shard2
+    expose:
+      - 27019
+  
+  mongo-configsvr:
+    image: mongo
+    command: mongod --configsvr --replSet configrs
+    expose:
+      - 27019
+
+```
+
+command: mongos --configdb mongo-configsvr:27019  
+
+- Once the container is created using the MongoDB image, this command line tells Docker what command to run inside the container. Here, you're running the mongos command, which is the MongoDB routing service used in sharded clusters.
+
+  
+  --configdb mongo-configsvr:27019
+  
+- In MongoDB sharded setups, there's a component called the "config server." The config server stores metadata about the sharded cluster, such as which data resides on which shard. It helps the MongoDB routing service, mongos, to direct requests appropriately to the correct shard.
+
+- --configdb: This is a flag/option you provide to the mongos command to specify where it can find this configuration server. In essence, you're telling the router, "Hey, if you want to know where to route database requests, here's where you find that information."
+
+- mongo-configsvr:  it's the name of another service you defined in your docker-compose file. In the context of Docker Compose, services can communicate with each other using the service names as if they were hostnames
+
+- mongo-configsvr:27019 tells mongos that it can find the configuration server on port 27019 of the mongo-configsvr service
