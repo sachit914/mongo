@@ -229,7 +229,7 @@ Imagine you have a large user database. Instead of keeping all user profiles in 
 - Zabbix
 
 
-## Docker-Compose Setup
+# Docker-Compose Setup
 
 ```
 version: '3.8'
@@ -261,7 +261,10 @@ services:
 
 ```
 
-command: mongos --configdb mongo-configsvr:27019  
+```
+docker-compose up
+```
+#### command: mongos --configdb mongo-configsvr:27019  
 
 - Once the container is created using the MongoDB image, this command line tells Docker what command to run inside the container. Here, you're running the mongos command, which is the MongoDB routing service used in sharded clusters.
 
@@ -275,3 +278,216 @@ command: mongos --configdb mongo-configsvr:27019
 - mongo-configsvr:  it's the name of another service you defined in your docker-compose file. In the context of Docker Compose, services can communicate with each other using the service names as if they were hostnames
 
 - mongo-configsvr:27019 tells mongos that it can find the configuration server on port 27019 of the mongo-configsvr service
+
+#### command: mongod --shardsvr --replSet shard1
+
+1) mongod:
+- This is the primary command to start a MongoDB server.
+-mongod stands for "MongoDB daemon". In the context of operating systems, a daemon is a background process that waits in the background, ready to perform an action when required. In this case, mongod is the main database process for MongoDB, responsible for handling data requests, managing data access, and other necessary database operations.
+2)--shardsvr:
+
+- This is an option/flag passed to the mongod command.
+- When you use --shardsvr, you're telling MongoDB to run this server as a shard server, meaning it will store a portion of the total dataset in a sharded MongoDB cluster.
+- In a sharded setup, data is distributed across multiple servers, with each server holding a "shard" or portion of the data. This helps distribute the data load and improve scalability.
+
+  3) --replSet shard1:
+
+- This is another option/flag passed to the mongod command.
+- --replSet stands for "replica set". A replica set is a group of MongoDB servers that maintain the same dataset. It offers redundancy, meaning if one server fails, the data can still be accessed from another server in the replica set. This provides both data redundancy and high availability.
+- shard1 is the name given to this particular replica set. So, this command is telling MongoDB to run this server as a part of a replica set named "shard1".
+
+  4) expose:
+
+This section deals with which ports the service will make available to other services in the same Docker Compose network.
+
+5) 27018
+
+The port 27018 is exposed, meaning the mongo-shard1 service can be accessed by other services within the same Docker network on this port. It's important to note that "expose" does NOT make the port available to the host machine or external networks. It's purely for inter-service communication within the Docker environment.
+
+#### command: mongod --configsvr --replSet configrs
+
+1) --configsvr: This flag indicates that this MongoDB instance will run as a configuration server. In MongoDB's sharded architecture, the configuration server stores metadata about the sharded cluster, helping the router (mongos) understand where data is stored across the various shards.
+2) --replSet configrs: This flag instructs the MongoDB server to run as a part of a replica set named "configrs". A replica set provides redundancy for the data, ensuring high availability. In the context of the config server, it ensures that the metadata about the sharded cluster is always available, even if one of the configuration servers were to fail.
+3) expose:
+
+This line begins a section that specifies which ports the service will make available to other services inside the same Docker Compose network.
+4) - 27019
+
+This line, under the expose: section, indicates that port 27019 of the mongo-configsvr container should be exposed. This means that the mongo-configsvr service will listen on port 27019 and can be accessed by other services within the same Docker network on this port. However, the "expose" directive does not publish the port to the host machine; it's primarily for inter-service communication within the Docker environment.
+
+
+```
+In summary, this configuration sets up a MongoDB configuration server that's part of the "configrs" replica set and listens on port 27019 for inter-service communications within the Docker network.
+```
+
+## Step 2: Initialize the MongoDB Sharded Cluster
+
+1) Initialize replica sets for the shards:
+
+ ```
+docker exec -it <container_id_of_mongo-shard1> mongo --eval "rs.initiate({_id: 'shard1', members: [{_id: 0, host: 'mongo-shard1:27018'}]})"
+docker exec -it <container_id_of_mongo-shard2> mongo --eval "rs.initiate({_id: 'shard2', members: [{_id: 0, host: 'mongo-shard2:27019'}]})"
+
+ ```
+
+2) Initialize the config server replica set:
+
+```
+docker exec -it <container_id_of_mongo-configsvr> mongo --eval "rs.initiate({_id: 'configrs', configsvr: true, members: [{_id: 0, host: 'mongo-configsvr:27019'}]})"
+
+```
+
+- --eval:
+This option is used to evaluate a JavaScript expression directly from the command line. In this context, it's used to run a MongoDB command directly without having to enter into the MongoDB shell interface.
+
+- "rs.initiate({...})"
+
+3) Add the shards to the router:
+
+```
+docker exec -it <container_id_of_mongo-router> mongo --eval "sh.addShard('shard1/mongo-shard1:27018')"
+docker exec -it <container_id_of_mongo-router> mongo --eval "sh.addShard('shard2/mongo-shard2:27019')"
+
+```
+
+
+
+###  Python App
+   
+```
+pip install pymongo
+
+```
+
+```
+from pymongo import MongoClient
+
+def get_shard_key(user_id):
+    """Simple function to determine the shard key based on user ID"""
+    return {"user_id": user_id}
+
+def insert_user(user_id, user_name):
+    client = MongoClient('localhost', 27017)
+    db = client.sharded_db
+    coll = db.users
+
+    # Insert the user
+    coll.insert_one({"_id": get_shard_key(user_id), "user_id": user_id, "user_name": user_name})
+
+    client.close()
+
+if __name__ == "__main__":
+    user_id = int(input("Enter user ID: "))
+    user_name = input("Enter user name: ")
+    insert_user(user_id, user_name)
+
+```
+
+```
+     +-----------------------+
+     |       Python App      |
+     |                       |
+     |  MongoClient          |
+     +------------+----------+
+                  |
+                  | 
+                  v
+     +------------+----------+
+     |     Mongo Router      |
+     |    (mongos)           |
+     +--+-------+-------+----+
+        |       |       |
+        |       |       |
+        v       v       v
+  +-----+----+ +-----+----+ +-----+----+
+  | Shard 1  | | Shard 2  | | Config   |
+  | (mongo-  | | (mongo-  | | Server   |
+  | shard1)  | | shard2)  | | (mongo-  |
+  +----------+ +--------- + +--------- +
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------
+```
+version: '3.8'
+
+services:
+  mongo-router:
+    image: mongo
+    command: mongos --configdb mongo-configsvr:27019
+    ports:
+      - 27017:27017
+  
+  mongo-shard1:
+    image: mongo
+    command: mongod --shardsvr --replSet shard1
+    expose:
+      - 27018
+  
+  mongo-shard2:
+    image: mongo
+    command: mongod --shardsvr --replSet shard2
+    expose:
+      - 27019
+  
+  mongo-configsvr:
+    image: mongo
+    command: mongod --configsvr --replSet configrs
+    expose:
+      - 27019
+```
+
+```
+docker-compose up
+
+```
+
+```
+docker exec -it <container_id_of_mongo-shard1> mongo --eval "rs.initiate({_id: 'shard1', members: [{_id: 0, host: 'mongo-shard1:27018'}]})"
+docker exec -it <container_id_of_mongo-shard2> mongo --eval "rs.initiate({_id: 'shard2', members: [{_id: 0, host: 'mongo-shard2:27019'}]})"
+```
+```
+docker exec -it <container_id_of_mongo-configsvr> mongo --eval "rs.initiate({_id: 'configrs', configsvr: true, members: [{_id: 0, host: 'mongo-configsvr:27019'}]})"
+```
+```
+docker exec -it <container_id_of_mongo-router> mongo --eval "sh.addShard('shard1/mongo-shard1:27018')"
+docker exec -it <container_id_of_mongo-router> mongo --eval "sh.addShard('shard2/mongo-shard2:27019')"
+```
+
+```
+pip install pymongo
+```
+
+```from pymongo import MongoClient
+
+def get_shard_key(user_id):
+    """Simple function to determine the shard key based on user ID"""
+    return {"user_id": user_id}
+
+def insert_user(user_id, user_name):
+    client = MongoClient('localhost', 27017)
+    db = client.sharded_db
+    coll = db.users
+
+    # Insert the user
+    coll.insert_one({"_id": get_shard_key(user_id), "user_id": user_id, "user_name": user_name})
+
+    client.close()
+
+if __name__ == "__main__":
+    user_id = int(input("Enter user ID: "))
+    user_name = input("Enter user name: ")
+    insert_user(user_id, user_name)
+
+```
