@@ -425,7 +425,7 @@ version: '3.8'
 services:
   mongo-router:
     image: mongo
-    command: mongos --configdb mongo-configsvr:27019
+    command: mongos --configdb configrs/mongo-configsvr:27019 --bind_ip_all
     ports:
       - 27017:27017
   
@@ -437,7 +437,7 @@ services:
   
   mongo-shard2:
     image: mongo
-    command: mongod --shardsvr --replSet shard2
+    command: mongod --shardsvr --replSet shard2 --port 27019
     expose:
       - 27019
   
@@ -454,11 +454,29 @@ docker-compose up
 ```
 
 ```
-docker exec -it <container_id_of_mongo-shard1> mongo --eval "rs.initiate({_id: 'shard1', members: [{_id: 0, host: 'mongo-shard1:27018'}]})"
-docker exec -it <container_id_of_mongo-shard2> mongo --eval "rs.initiate({_id: 'shard2', members: [{_id: 0, host: 'mongo-shard2:27019'}]})"
+docker exec -it <container_id_of_mongo-shard1> mongosh --host mongo-shard1 --port 27018 --eval "rs.initiate({_id: 'shard1', members: [{_id: 0, host: 'mongo-shard1:27018'}]})"
+
+docker exec -it <container_id_of_mongo-shard2> mongosh --host mongo-shard2 --port 27019 --eval "rs.initiate({_id: 'shard2', members: [{_id: 0, host: 'mongo-shard2:27019'}]})"
+
 ```
+
+
+to check all ports listening in docker
+
 ```
-docker exec -it <container_id_of_mongo-configsvr> mongo --eval "rs.initiate({_id: 'configrs', configsvr: true, members: [{_id: 0, host: 'mongo-configsvr:27019'}]})"
+docker exec -it 6b0b2991af33 bash -c "apt-get update && apt-get install -y net-tools && netstat -tuln"
+
+or
+
+docker exec -it 8d15e495a894 bash -c "netstat -tuln"
+
+
+```
+
+
+```
+docker exec -it <container_id_of_mongo-configsvr> mongosh --host mongo-configsvr --port 27019 --eval "rs.initiate({_id: 'configrs', configsvr: true, members: [{_id: 0, host: 'mongo-configsvr:27019'}]})"
+
 ```
 ```
 docker exec -it <container_id_of_mongo-router> mongo --eval "sh.addShard('shard1/mongo-shard1:27018')"
